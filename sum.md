@@ -1254,6 +1254,22 @@ ${0:0:1}  $0表示脚本名字, 0:1 表示取脚本的第一个字符
    declare -a var 
    ```
 
+### man.linux
+
+1. sed
+
+   匹配给定样式的其中一部分
+
+   ```
+   echo this is digit 7 in a num |sed 's/digit \([0-9]\)/\1/'
+   or
+   echo this is digit 7 in num|sed  -r 's/digit ([0-7])/\1/'
+   this is 7 in num
+   sed -i -r 's/(.*)=PW.+/\1=1234/' test
+   ```
+
+   命令中 digit 7，被替换成了 7。样式匹配到的子串是 7，\(..\) 用于匹配子串，对于匹配到的第一个子串就标记为 **\1**，依此类推匹配到的第二个结果就是 **\2**
+
 
 
 
