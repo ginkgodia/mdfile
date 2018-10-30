@@ -1,0 +1,331 @@
+推荐执行方案：
+
+ 禁止自动执行Housekeeping
+
+```
+修改参数：
+HousekeepingFrequency=0
+# MaxHousekeeperDelete=10000
+```
+
+禁止自动执行housekeeping 后， 过期数据不会被清理
+
+数据过期时间可以通过下列方式查看
+
+![](C:\Users\qc.wu\AppData\Roaming\Typora\typora-user-images\1540460813244.png)
+
+如果需要进行历史数据清理可以执行下列命令
+
+```shell
+$ zabbix_server -R housekeeper_execute
+```
+
+执行产生结果
+
+```shell
+$mysql> show processlist;
+   123587 | zabbix | localhost | zabbix             | Query   |    0 | System lock | delete from history where itemid=35679 and clock<1517868279
+```
+
+会按最旧的数据根据一定规则进行删除
+
+zabbix 参数验证
+
+1. ###系统环境
+
+```
+# cat /etc/os-release
+CentOS Linux release 7.2.1511 (Core)
+# free -m
+              total        used        free      shared  buff/cache   available
+Mem:           7984         880         227         350        6876        6445
+Swap:          8191         329        7862
+# lscpu
+Architecture:          x86_64
+CPU op-mode(s):        32-bit, 64-bit
+Byte Order:            Little Endian
+CPU(s):                2
+On-line CPU(s) list:   0,1
+Thread(s) per core:    1
+Core(s) per socket:    1
+Socket(s):             2
+NUMA node(s):          1
+Vendor ID:             GenuineIntel
+CPU family:            6
+Model:                 42
+Model name:            Intel Xeon E312xx (Sandy Bridge)
+Stepping:              1
+CPU MHz:               1799.999
+BogoMIPS:              3599.99
+Hypervisor vendor:     KVM
+Virtualization type:   full
+L1d cache:             32K
+L1i cache:             32K
+L2 cache:              4096K
+NUMA node0 CPU(s):     0,1
+```
+
+2. ### 场景：
+
+**场景1**.  zabbix_server 报错zabbix_agent unreachable for 5 minutes
+
+   此场景下未参与故障排查，客户反映根据日志报错提示调整了参数
+
+   ```
+   日志server的history cache 少于25的告警，然后查看了系统内存使用率低，应该是配置里的太少了，先重启了server，告警没了
+   将参数由默认调整到了256M
+   ```
+
+   方案解释： 未明确
+
+   ```shel 
+   根据配置中的定义
+   HistoryCacheSize #Shared memory size for storing history date
+   参考范围是128k - 2G，客户直接调整到256M
+   修改配置后重启server, 告警消失，但未能确定和解决故障有直接关系
+   ```
+
+   实验环境中测试： 
+
+   方案影响： 
+
+   这个参数是用来划分系统共享内存来储存采集的历史数据，此处数值越大，数据库的压力越小， 对server处理item能力有提升
+
+   ```
+   测验数值： HistoryCacheSize=256M
+   ```
+
+
+
+ **场景2**. 客户反映zabbix_server 报错 Housekeeper is busy than 75%
+
+   	客户环境中的配置为
+
+   ```
+   HousekeepingFrequency=1
+   MaxHousekeeperDelete=500
+   第一个参数表示Housekeeper执行间隔， 以小时为单位
+   第二个参数表示执行一次Housekeeper会清理多少旧数据
+   
+   清理 history, alert, and alarms 表的过期数据的频率，以小时为单位，过期数据的判断则根据配置中指定的数据的保留时长。
+   从直观上将， 这个数值是偏小的， 因为客户监控的主机量有50~60台，item量应该在3000~5000左右，每小时生成的数据量 一个小时清理500左右的旧数据可能性能比较繁忙，由于housekeeper 执行原理是在数据库中执行delete操作，且不释放删除行所占用的磁盘，所以不建议采用housekeeper，但在小规模生产中仍然可以采用
+   根据经验值
+   HousekeepingFrequency=1
+   MaxHousekeeperDelete=10000
+   ```
+
+   目前实验环境中的数据量为
+
+   ```
+   select table_name ,table_rows from tables  where table_schema='zabbix'  and table_name like 'history%';
+   +--------------+------------+
+   | table_name   | table_rows |
+   +--------------+------------+
+   | history      |  346714451 |
+   | history_log  |      77194 |
+   | history_str  |     296251 |
+   | history_text |   25889095 |
+   | history_uint |  334381300 |
+   +--------------+------------+
+   
+   ```
+
+   将实验环境中的zabbix_server配置修改为客户的配置后，等待半个小时后，housekeeper 占用率达到了100%
+
+   ```
+   Zabbix busy housekeeper processes, in %	2018-10-24 22:40:38	100 %
+   ```
+
+   将配置改为
+
+   ```
+   HousekeepingFrequency=1
+   MaxHousekeeperDelete=10000
+   ```
+
+   数据量对比
+
+   ```
+   mysql> select table_name ,table_rows from tables  where table_schema='zabbix'  and table_name like '%history%';
+   +----------------+------------+
+   | table_name     | table_rows |
+   +----------------+------------+
+   | history        |  346695651 |
+   | history_log    |      77196 |
+   | history_str    |     296256 |
+   | history_text   |   25861639 |
+   | history_uint   |  334237402 |
+   | proxy_dhistory |          0 |
+   | proxy_history  |          0 |
+   +----------------+------------+
+   7 rows in set (0.00 sec)
+   ```
+
+   busy housekeeper 重启后短暂时间内为0% ，一段时间后上升为100%， 原因是由于zabbix server 的保护机制会在30分钟后开始执行housekeeper
+
+   ```
+   Zabbix busy housekeeper processes, in %	2018-10-24 23:13:38	0 %
+   ```
+
+   ```
+   show status like "%Table%";
+   +-----------------------------------------+-------+
+   | Variable_name                           | Value |
+   +-----------------------------------------+-------+
+   | Com_alter_table                         | 0     |
+   | Com_alter_tablespace                    | 0     |
+   | Com_create_table                        | 0     |
+   | Com_drop_table                          | 0     |
+   | Com_lock_tables                         | 0     |
+   | Com_rename_table                        | 0     |
+   | Com_show_create_table                   | 0     |
+   | Com_show_open_tables                    | 0     |
+   | Com_show_table_status                   | 0     |
+   | Com_show_tables                         | 0     |
+   | Com_unlock_tables                       | 0     |
+   | Created_tmp_disk_tables                 | 0     |
+   | Created_tmp_tables                      | 0     |
+   | Open_table_definitions                  | 258   |
+   | Open_tables                             | 1752  |
+   | Opened_table_definitions                | 0     |
+   | Opened_tables                           | 0     |
+   | Performance_schema_table_handles_lost   | 0     |
+   | Performance_schema_table_instances_lost | 0     |
+   | Performance_schema_table_lock_stat_lost | 0     |
+   | Slave_open_temp_tables                  | 0     |
+   | Table_locks_immediate                   | 99    |
+   | Table_locks_waited                      | 0     |
+   | Table_open_cache_hits                   | 0     |
+   | Table_open_cache_misses                 | 0     |
+   | Table_open_cache_overflows              | 0     |
+   +-----------------------------------------+-------+
+   ```
+
+   ```
+   mysql> select from_unixtime(unix_timestamp());
+   +---------------------------------+
+   | from_unixtime(unix_timestamp()) |
+   +---------------------------------+
+   | 2018-10-25 09:29:32             |
+   +---------------------------------+
+   1 row in set (0.00 sec)
+          
+   mysql> select table_name ,table_rows from tables  where table_schema='zabbix'  and table_name like '%history%';
+   +----------------+------------+
+   | table_name     | table_rows |
+   +----------------+------------+
+   | history        |  344910102 |
+   | history_log    |      77274 |
+   | history_str    |     296563 |
+   | history_text   |   25866692 |
+   | history_uint   |  334571105 |
+   | proxy_dhistory |          0 |
+   | proxy_history  |          0 |
+   +----------------+------------+
+   7 rows in set (0.00 sec)
+          
+   mysql> select from_unixtime(unix_timestamp());
+   +---------------------------------+
+   | from_unixtime(unix_timestamp()) |
+   +---------------------------------+
+   | 2018-10-25 09:32:10             |
+   +---------------------------------+
+   1 row in set (0.01 sec)
+          
+   mysql> select table_name ,table_rows from tables  where table_schema='zabbix'  and table_name like '%history%';
+   +----------------+------------+
+   | table_name     | table_rows |
+   +----------------+------------+
+   | history        |  344857841 |
+   | history_log    |      77225 |
+   | history_str    |     296378 |
+   | history_text   |   25866816 |
+   | history_uint   |  334487326 |
+   | proxy_dhistory |          0 |
+   | proxy_history  |          0 |
+   +----------------+------------+
+   7 rows in set (0.00 sec)
+    select unix_timestamp();
+   +------------------+
+   | unix_timestamp() |
+   +------------------+
+   |       1540431777 |
+   +------------------+
+   1 row in set (0.00 sec)
+          
+   mysql> use information_schema
+   Database changed
+   mysql> select table_name ,table_rows from tables  where table_schema='zabbix'  and table_name like '%history%';
+   +----------------+------------+
+   | table_name     | table_rows |
+   +----------------+------------+
+   | history        |  344782278 |
+   | history_log    |      77228 |
+   | history_str    |     296383 |
+   | history_text   |   25839110 |
+   | history_uint   |  334379471 |
+   | proxy_dhistory |          0 |
+   | proxy_history  |          0 |
+   +----------------+------------+
+   7 rows in set (0.00 sec)
+   ```
+
+   ```shell
+   数据库的删除操作占用大量的数据库性能
+   > show processlist;
+   | 122357 | zabbix | localhost       | zabbix             | Query   |  754 | updating | delete from history where itemid=35300 limit 100000
+   | 122357 | zabbix | localhost | zabbix             | Query   |  949 | updating | delete from history where itemid=35300 limit 100000
+   | 122357 | zabbix | localhost       | zabbix             | Query   |  135 | updating            | delete from history where itemid=35301 limit 100000       
+   | 122357 | zabbix | localhost       | zabbix             | Query   |  343 | updating            | delete from history where itemid=35302 limit 100000  
+   。。。。
+   122357 | zabbix | localhost | zabbix             | Query   |    3 | updating | delete from history where itemid=35304 limit 100000
+   ```
+
+由于housekeeper会大量执行删除操作，所以他是一个严重影响数据库性能的一个进程
+
+   http://zabbixzone.com/zabbix/history-tables-housekeeper/   
+
+>  Each item on Zabbix can have your own housekeeper value. But this feature turns housekeeping process a performance killer, because [delete_history() function](http://git.zabbixzone.com/zabbix1.8/.git/blob/HEAD:/src/zabbix_server/housekeeper/housekeeper.c#l261)executes a DELETE per item every turn. If you have 100k items, 100k DELETE queries will be executed.
+
+如果启用Housekeeper， 从数据库的操作记录来看，他会一直执行对数据库监控项过期数据的删除操作， 会严重影响性能
+
+注意： 开启这两个参数会程序会对各个历史数据进行逐条删除操作，因此占用率高仍会持续一定时间来执行删除操作
+
+```
+      HousekeepingFrequency=1
+      MaxHousekeeperDelete=10000
+```
+
+   优点： 开启此参数可以对数据库中历史数据的进行过期数据的清理，节省磁盘空间
+   缺点： 如果数据库性能较低或者是主机性能不足会严重影响数据库性能，且如果直接体验是访问zabbix界面卡顿
+
+总结方案：
+
+   
+
+   ```
+   HousekeepingFrequency=0
+   ```
+
+   ```
+   HousekeepingFrequency为0来禁止自动housekeeping. 此时 housekeeping 只能通过 housekeeper_execute 启动，在一个housuekeeping周期内删除的过时信息的周期是最后一次housekeeping以来的时间的4倍,不少于4小时不大于4天。
+   ```
+
+   Zabbix server的housekeeper 进程负责从数据库中删除旧数据。如果需要删除的数据过多，可能会占用大量的系统资源，这可能会对其他正在执行更重要任务的进程产生影响，所以可以禁用Housekeeping 自动清理，手工执行清理命令
+​          
+
+   ```
+   zabbix_server -R housekeeper_execute
+数据库状态：
+> show processlist;
+   123587 | zabbix | localhost | zabbix             | Query   |    0 | System lock | delete from history where itemid=35679 and clock<1517868279 
+   > select from_unixtime(1517868279);
+   +---------------------------+
+   | from_unixtime(1517868279) |
+   +---------------------------+
+   | 2018-02-06 06:04:39       |
+   +---------------------------+
+   数据库直接以时间为单位执行删除操作， 删除时间从最旧的数据开始，删除的数据量以上一次执行housekeeper 为基础的时间范围删除
+   ```
+
+   这样可以在一定程度上节省系统资源，可以在需要清理的时候执行清理命令
