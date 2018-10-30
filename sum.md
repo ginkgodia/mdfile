@@ -231,7 +231,7 @@ sudo systemctl disable apt-daily.timer   # 使得timer不再能用
 
 
 
-​    
+    
 
 ##++SYSTEMD++  
 
@@ -952,7 +952,7 @@ sysctl -p /etc/sysctl.d/k8s.conf
 
 ### - 数据库
 
-​	update user set password=password("000") where user='root';
+	update user set password=password("000") where user='root';
 
 - bind-address
 
