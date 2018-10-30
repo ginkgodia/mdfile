@@ -1290,13 +1290,13 @@ ${0:0:1}  $0表示脚本名字, 0:1 表示取脚本的第一个字符
    3. 对网络进行抓包查看
    ```
 
-   ![](/home/ginkgo/Pictures/wireshark1.png)
+   ![](./wireshark1.png)
 
-   ![](/home/ginkgo/Pictures/wireshark2.png)
+   ![](./wireshark2.png)
 
    发现有重置报文,且和正常的ssh 报文有出入
 
-   ![](/home/ginkgo/Pictures/sshcap.png)
+   ![](./sshcap.png)
 
    ```
    由此怀疑是网络拦截,联系阿里云客服后发现"看您有reset情况，为排除我方拦截影响，您把本地公网ip云盾加白后测试下。云盾访问白名单地址 https://yundun.console.aliyun.com/?p=sc#/sc/visitWhiteList  "
