@@ -67,7 +67,7 @@
 	所以, 在ubuntu 创建用户命令:  
 	useradd -m -ppasswd -s /bin/bash username 
 
-### redhat 7 使用centos7 的源
+### yum源
 
 RedHat yum源是收费的，没有成功注册RH的机器是不能正常使用yum的， 它的yum 源需要注册付费， 一般采用centos的源来替代或者在本地用本地镜像来做本地源。
 
@@ -143,6 +143,16 @@ yum makecache
 
    ssh hostname 时先用$HOME/.ssh/config 和/etc/ssh/ssh_config 配置文件中获取以什么帐户登陆到hostname上去，如果没有配置，那么尝试用本机当前帐户登陆
 
+   `.ssh/config`
+
+   ```
+   Host 别名
+       Hostname 主机名
+       Port 端口
+       User 用户名
+    chmod 600 .ssh/config 
+   ```
+
 2. ssh 参数
 
    ```
@@ -165,7 +175,21 @@ yum makecache
    3. expect
    ```
 
+### yum 优先级
 
+`yum install -y yum-plugin-priorities`
+
+```
+/etc/yum.repos.d/local.repo
+    [local]
+    name=local
+    baseurl=file:///opt/centos
+    enabled=1
+    gpgcheck=0
+    priority=1
+    #在原基础上加入priority=1 ；数字越小优先级越高
+    #可以继续修改其他源的priority值，经测试仅配置本地源的优先级为priority=1就会优先使用本地源了
+```
 
 
 
