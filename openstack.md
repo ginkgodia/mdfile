@@ -16,6 +16,56 @@
 >
 > Developer ：默认的一个角色。
 
+### openstack 组件逻辑关系
+
+![组件逻辑关系](./openstack.png)
+
+### openstack 新建云主机流程图
+
+![新建云主机流程图](./openstack2.png)
+
+> 1. 界面或命令行通过RESTful API向keystone获取认证信息。
+> 2. keystone通过用户请求认证信息，并生成auth-token返回给对应的认证请求。
+> 3. 界面或命令行通过RESTful API向nova-api发送一个boot instance的请求（携带auth-token）。
+> 4. nova-api接受请求后向keystone发送认证请求，查看token是否为有效用户和token。
+> 5. keystone验证token是否有效，如有效则返回有效的认证和对应的角色（注：有些操作需要有角色权限才能操作）。
+> 6. 通过认证后nova-api和数据库通讯。
+> 7. 初始化新建虚拟机的数据库记录。
+> 8. nova-api通过rpc.call向nova-scheduler请求是否有创建虚拟机的资源(Host ID)。
+> 9. nova-scheduler进程侦听消息队列，获取nova-api的请求。
+> 10. nova-scheduler通过查询nova数据库中计算资源的情况，并通过调度算法计算符合虚拟机创建需要的主机。
+> 11. 对于有符合虚拟机创建的主机，nova-scheduler更新数据库中虚拟机对应的物理主机信息。
+> 12. nova-scheduler通过rpc.cast向nova-compute发送对应的创建虚拟机请求的消息。
+> 13. nova-compute会从对应的消息队列中获取创建虚拟机请求的消息。
+> 14. nova-compute通过rpc.call向nova-conductor请求获取虚拟机消息。（Flavor）
+> 15. nova-conductor从消息队队列中拿到nova-compute请求消息。
+> 16. nova-conductor根据消息查询虚拟机对应的信息。
+> 17. nova-conductor从数据库中获得虚拟机对应信息。
+> 18. nova-conductor把虚拟机信息通过消息的方式发送到消息队列中。
+> 19. nova-compute从对应的消息队列中获取虚拟机信息消息。
+> 20. nova-compute通过keystone的RESTfull API拿到认证的token，并通过HTTP请求glance-api获取创建虚拟机所需要镜像。
+> 21. glance-api向keystone认证token是否有效，并返回验证结果。
+> 22. token验证通过，nova-compute获得虚拟机镜像信息(URL)。
+> 23. nova-compute通过keystone的RESTfull API拿到认证k的token，并通过HTTP请求neutron-server获取创建虚拟机所需要的网络信息。
+> 24. neutron-server向keystone认证token是否有效，并返回验证结果。
+> 25. token验证通过，nova-compute获得虚拟机网络信息。
+> 26. nova-compute通过keystone的RESTfull API拿到认证的token，并通过HTTP请求cinder-api获取创建虚拟机所需要的持久化存储信息。
+> 27. cinder-api向keystone认证token是否有效，并返回验证结果。
+> 28. token验证通过，nova-compute获得虚拟机持久化存储信息。
+> 29. nova-compute根据instance的信息调用配置的虚拟化驱动来创建虚拟机。
+
+### Hypervisor 
+
+1. Hypervisor 一种运行在基础物理服务器和操作系统之间的中间软件层，可允许多个操作系统和应用共享硬件，也叫VMM，即虚拟监视器
+2. Hypervisors是一种在虚拟环境中的“元”操作系统。他们可以访问服务器上包括磁盘和内存在内的所有物理设备。Hypervisors不但协调着这些硬件资源的访问，也同时在各个虚拟机之间施加防护。当服务器启动并执行Hypervisor时，它会加载所有虚拟机客户端的操作系统同时会分配给每一台虚拟机适量的内存，CPU，网络和磁盘。
+
+Xen, KVM 都是Linux Hypervisor，但是它们进行虚拟化的方式却不尽相同。
+Xen是安装在X86架构电脑上的一个虚拟机（VM）监控器。通过半虚拟化技术，Xen允许hypervisor和虚拟机互相进行通讯，这项技术落后于KVM
+
+KVM 是基于内核的虚拟机
+
+LXC : linux containers
+
 ##nova 
 
 ### nova 逻辑架构
