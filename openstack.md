@@ -16,6 +16,114 @@
 >
 > Developer ：默认的一个角色。
 
+### openstack 基础
+
+1. hypervisor 虚拟化
+
+   - 1型虚拟化
+     Hypervisor 直接安装在物理机上，多个虚拟机在Hypervisor上运行， Hypervisor实现方式一般是一个特殊定制的Linux 系统， Xen 和VMware的ESXi都属于这个类型
+
+   - 2型虚拟化
+     物理机上首先安装常规的操作系统，比如 Redhat、Ubuntu 和 Windows。Hypervisor 作为 OS 上的一个程序模块运行，并对管理虚拟机进行管理。KVM、VirtualBox 和 VMWare Workstation 都属于这个类型。
+
+2. libvirtd
+   Libvirt 包含 3 个东西：后台 daemon 程序 libvirtd、API 库和命令行工具 virsh
+   libvirtd是服务程序，接收和处理 API 请求；              
+   API 库使得其他人可以开发基于 Libvirt 的高级工具，比如 virt-manager，这是个图形化的 KVM 管理工具，后面我们也会介绍；           
+   virsh 是我们经常要用的 KVM 命令行工具，后面会有使用的示例。
+
+3. cpu超配
+   虚机的 vCPU 总数可以超过物理 CPU 数量，这个叫 CPU overcommit（超配）。
+   KVM 允许 overcommit，这个特性使得虚机能够充分利用宿主机的 CPU 资源，但前提是在同一时刻，不是所有的虚机都满负荷运行。
+   当然，如果每个虚机都很忙，反而会影响整体性能，所以在使用 overcommit 的时候，需要对虚机的负载情况有所了解，需要测试
+
+4. mem超售
+   为了在一台机器上运行多个虚拟机，KVM 需要实现 VA（虚拟内存） -> PA（物理内存） -> MA（机器内存）直接的地址转换。虚机 OS 控制虚拟地址到客户内存物理地址的映射 （VA -> PA），但是虚机 OS 不能直接访问实际机器内存，因此 KVM 需要负责映射客户物理内存到实际机器内存 （PA -> MA）。具体的实现就不做过多介绍了，大家有兴趣可以查查资料。
+   还有一点提醒大家，内存也是可以 overcommit 的，即所有虚机的内存之和可以超过宿主机的物理内存。
+
+5. 存储
+   KVM 的存储虚拟化是通过存储池（Storage Pool）和卷（Volume）来管理的
+   storage pool
+
+   - 目录类型的storage pool
+     kvm 将宿主机目录/var/lib/libvirt/images作为默认的storage pool
+     volume就是目录下的文件，一个文件就是一个volume
+     镜像文件 cirros-0.3.3-x8664-disk.img 放到了这个目录下。文件 cirros-0.3.3-x8664-disk.img 也就是Volume，对于 kvm1 来说，就是它的启动磁盘了
+
+     KVM 所有可以使用的 Storage Pool 都定义在宿主机的 /etc/libvirt/storage 目录下，每个 Pool 一 个 xml 文件，默认有一个 default.xml
+
+     ![storage-pool-file](./storage-pool-file.jpg)
+
+     KVM 支持多种 Volume 文件格式
+     raw 是默认格式，即原始磁盘镜像格式，移植性好，性能好，但大小固定，不能节省磁盘空间。
+     qcow2 是推荐使用的格式，cow 表示 copy on write，能够节省磁盘空间，支持 AES 加密，支持 zlib 压缩，支持多快照，功能很多。
+     vmdk 是 VMWare 的虚拟磁盘格式，也就是说 VMWare 虚机可以直接在 KVM上 运行
+
+   - lvm 型的
+
+     ![storage-pool-lvm](./storage-pool-lvm.jpg)
+
+   - 其他类型的，例如ceph
+
+6. Linux 网络接口配置(/etc/network/interfaces)
+
+   初始化网口Ethernet Interface
+
+   大部分的网络接口配置都可以在/etc/network/interfaces中解决，例如设置ip，配置路由，掩码，默认路由等。
+
+   如果想要在系统启动时就启动网口，需要添加auto 一行
+
+   >
+   >
+   >1. 配置DHCP 自动配置接口
+   >
+   >   auto eth0
+   >     allow-hotplug eth0
+   >     iface eth0 inet dhcp
+   >
+   >2. 手动配置网口
+   >
+   >   auto eth0
+   >
+   >   iface eth0 inet static
+   >     address 192.0.2.7
+   >     netmask 255.255.255.0
+   >     gateway 192.0.2.254
+   >
+   >3. 启动网口但不配ip
+   >
+   >   如果想要创建一个没有ip地址的网口，就需要使用manual方法和pre-up, post-down来启动和关闭网口
+   >
+   >   iface eth0 inet manul
+   >
+   >      pre-up ifconfig $IFACE up
+   >
+   >     post-down ifconfig $IFACE down
+   >
+   >4. 创建vlan 设备
+   >
+   >   auto eth0.10
+   >
+   >   iface eth0.10 inet manual
+   >
+   >     vlan-raw-device eth0
+   >
+   >   auto brvlan10
+   >
+   >   iface brvlan10 inet manual
+   >
+   >     bridge_stp off
+   >   
+   >    bridge_waitport 0
+   >   
+   >    bridge_fd 0   #bridge_fd is the bridge forward delay time, in seconds, default 15.
+   >   
+   >    bridge_ports eth0.10
+
+7. virbr0 是 KVM 默认创建的一个 Bridge，其作用是为连接其上的虚机网卡提供 NAT 访问外网的功能。
+
+
+
 ### openstack 组件逻辑关系
 
 ![组件逻辑关系](./openstack.png)
@@ -65,6 +173,12 @@ Xen是安装在X86架构电脑上的一个虚拟机（VM）监控器。通过半
 KVM 是基于内核的虚拟机
 
 LXC : linux containers
+
+## 消息总线
+
+
+
+
 
 ##nova 
 
@@ -139,6 +253,33 @@ nova-api对外统一提供标准化接口，各子模块，如计算资源，存
 > 6.nova-network接收到消息就，从fixedIP表(数据库)里拿出一个可用IP，nova-network根据私网资源池，结合DHCP，实现IP分配和IP地址绑定
 >
 > 7.nova-compute通过调用volume-api实现存储划分，最后调用底层虚拟化Hypervisor技术，部署虚拟机。
+
+### nova 常用命令
+
+1. 查看计算节点资源使用量
+
+   - openstack host show "compute-node.name"
+   - nova host-describe 'compute-node.name'
+   - openstack host list 
+
+   ```
+   # openstack host show node-4.domain.tld
+   +-------------------+--------------------------+-----+-----------+---------+
+   | Host              | Project                          | CPU | Memory MB | Disk GB |
+   +-------------------+--------------------------+-----+-----------+---------+
+   | node-4.domain.tld | (total)                          |   4 |     16070 |    1861 |
+   | node-4.domain.tld | (used_now)                       |   2 |      2048 |      40 |
+   | node-4.domain.tld | (used_max)                       |   2 |      1536 |      40 |
+   | node-4.domain.tld | d0d115b85cda44f3a6e982883b9ec354 |   2 |      1536 |      40 |
+   +-------------------+-------------------------+-----+-----------+-----
+   ```
+
+   显示了计算节点上资源的使用情况，包括：总量(total)，当前使用量(used_now)和每个租户的使用量(project)。在这里host又代表的是compute_node
+
+   迁移之前会查看目标主机的资源容量是否满足迁移实例的大小，即会比较的是剩余容量，但是调度模块那的过滤调度部分，对于内存过滤来说，允许过载，有过载比例的设置，故此在剩余容量为0后，仍能调度创建。
+
+
+
 
 ### nova 源代码结构
 
@@ -286,7 +427,202 @@ plugin
 
 
 
+### command
 
+```shell
+#brctl addbr br0  # 创建一个虚拟以太网桥接口， 在主机bridge上执行
+#brctl stp br0 off  # 我们不需要stp(生成树协议）
+#brctl addif br0 eth0 # 将以太物理接口附加到刚生成的逻辑网桥接口br0上， 原来我们的以太网物理接口变成了网桥上的两个逻辑端口，现在他们成了逻辑网桥的一部分了， 所以也不需要ip地址了,下面释放ip地址
+#ifconfig eth0 down 
+#ifconfig eth0 0.0.0.0 up
+```
+
+### links
+
+gre: http://www.aboutyun.com/thread-13008-1-1.html
+
+vlan:  http://www.aboutyun.com/thread-13026-1-1.html
+
+xvlan: http://www.aboutyun.com/thread-13027-1-1.html
+
+### openvswitch
+
+openvswitch 是运行在虚拟平台上的虚拟交换机， 在虚拟化平台上， ovs 可以为动态变化的端点提供二层交换功能， 很好的控制虚拟网络中的访问策略，网络隔离，流量监控
+
+关键概念： 
+
+- Bridge: bridge 代表一个以太网交换机（Switch), 一个主机中可以创建一个或者多个Bridge设备
+- Port: 端口与物理交换机的端口概念类似， 每个端口都隶属于一个Bridge
+- Interface: 连接到端口的网络接口设置， 通常情况下， Port和Interface 是一对一的关系，只有在配置Port为Bond模式后，Port和Interface 才是一对多的关系
+- Controller: OpenFlow 控制器， OVS可以同时接受一个或多个OpenFlow 控制器的管理
+- dataPath： 在OVS中， datapath 负责执行数据交换，也就是说从接收端口收到的数据包在流表中进行匹配，并执行匹配到的动作
+- Flow table : 每个datapath 都和一个flow table 关联，当datapath 接受到数据后， ovs会在flow table中查找可以匹配的flow，执行对应的操作，例如转发数据
+
+ovs-vsctl 查询和更新 ovs-vswitchd 的配置
+
+1. 添加/删除名为br0 的网桥
+
+   ovs-vsctl add-br/del-br br0
+
+2. 列出所有网桥
+
+   ovs-vsctl list-br
+
+3. 判断网桥是否存在
+
+   ovs-vsctl br-exists br0
+
+4. 列出挂接到网桥br0上的所有网络接口
+
+   ovs-vsctl list-ports br0
+
+5. 将网络接口eth0 挂接/删除 br0 
+
+   ovs-vsctl add-port/del-port br0 eth0
+
+6. 列出已挂接eth0 网络接口的网桥
+
+   ovs-vsctl port-to-br eth0
+
+7. 查看虚拟机内的网卡/list all domain virtual interfaces
+
+   virsh domiflist instance-00000020
+
+vsdb 操作
+
+8. ovsdb 是一个轻量级的数据库，数据库操作的一般格式：
+
+   ovs-vsctl list/set/get/add/remove/clear/destroy table record column [value]
+
+   默认情况下， ovsdb 中有以下数据表     bridge,controller,interface,mirror,netflow,open_vswitch,port,qos,queue,ssl,sflow
+
+9. 查看bridge数据表中所有记录
+    ovs-vsctl list bridge
+
+10. 获取bridge 的_uuid/datapath_type 字段
+  ovs-vsctl get bridge br-int _uuid/datapath_type
+
+流表操作
+
+8. 查看虚拟交换机的信息
+   ovs-ofctl show br-int
+9. 查看某个网桥上的端口状态信息
+   ovs-ofctl dump-ports br-int
+10. 查看网桥上所有的流规则
+   ovs-ofctl dump-flows br-int
+
+Qos 设置
+
+11. Qos 可以针对网络接口，也可以针对端口设置
+
+    ```
+    #ovs-vsctl set interface tap-xxx ingress_policing_rate=1000
+    #ovs-vsctl set interface tap-xxx ingress_policing_burst=100
+    ```
+
+端口映射
+
+12. 将发往p0端口和从p1端口发出的数据包全部定向到p2端口，用ovs-vsctl list port 查看p0,p1,p2的uuid为id1, id2, id3
+
+    ```
+    ovs-vsctl --set bridge br0 mirrors=@m-- --id=@m create mirror name=mymirror select-dst-port=id_1 select-src-port=id_2 output-port=id3
+    ```
+
+### namespace
+
+netns是在linux中提供网络虚拟化的一个项目，使用netns网络空间虚拟化可以在本地虚拟化出多个网络环境，目前netns在lxc容器中被用来为容器提供网络。
+
+> ip netns list - show all of the named network namespaces 列出所有名称空间
+> ip netns add NETNSNAME - create a new named network namespace 创建一个新的名称空间
+> ip netns delete NETNSNAME - delete the name of a network namespace 删除一个名称空间
+> ip netns exec NETNSNAME cmd ... - Run cmd in the named network namespace 在网络名称空间中执行系统命令
+>
+> ip [-all] netns exec [ NAME ] cmd ... - Run cmd in the named network namespace.
+>   If -all option was specified then cmd will be executed synchronously on the each named network namespace.
+
+ip link 
+
+创建虚拟设备
+
+ip link 查看所有设备
+
+ip link shwo 显示设备属性
+
+ip link add   新增虚拟设备
+
+
+
+veth设备是成对出现的，一端连接的是内核协议栈，一端彼此相连。一个设备收到协议栈的数据，会将数据发送另一个设备上去
+
+## cinder
+
+提升某个租户的配额
+
+```
+cinder quota-update --backup-gigabytes 备份空间大小 $tenantid
+```
+
+```shell
+#keystone tenant-list
++----------------------------------+----------+---------+
+|                id                |   name   | enabled |
++----------------------------------+----------+---------+
+| 565ef74e3555421fb4ce8e21c352de16 |  admin   |   True  |
+| 8a1021dd9aca4c2bbc379da5b73a4172 | services |   True  |
++----------------------------------+----------+---------+
+
+#cinder quota-show 565ef74e3555421fb4ce8e21c352de16
++----------------------+-------+
+|       Property       | Value |
++----------------------+-------+
+|   backup_gigabytes   |  1000 |
+|       backups        |   10  |
+|      gigabytes       |  1000 |
+| per_volume_gigabytes |   -1  |
+|      snapshots       |   10  |
+|       volumes        |   10  |
++----------------------+-------+
+# cinder quota-update --backup-gigabytes 2000 565ef74e3555421fb4ce8e21c352de16
++----------------------+-------+
+|       Property       | Value |
++----------------------+-------+
+|   backup_gigabytes   |  2000 |
+|       backups        |   10  |
+|      gigabytes       |  1000 |
+| per_volume_gigabytes |   -1  |
+|      snapshots       |   10  |
+|       volumes        |   10  |
++----------------------+-------+
+
+```
+
+
+
+
+
+## Pacemaker
+
+- pacemaker 资源管理器(CRM),负责启动和停止服务，而且保证他们是一直运行着的以及某个时刻某服务只在一个节点上运行，避免多服务同时操作数据库造成的混乱
+
+- Corosync - 消息层组件（Messaging Layer），管理成员关系、消息和仲裁
+
+- Resource Agents - 资源代理，实现在节点上接收 CRM 的调度对某一个资源进行管理的工具，这个管理的工具通常是脚本，所以我们通常称为资源代理。任何资源代理都要使用同一种风格，接收四个参数：{start|stop|restart|status}，包括配置IP地址的也是。每个种资源的代理都要完成这四个参数据的输出。Pacemaker 的 RA 可以分为三种：（1）Pacemaker 自己实现的 （2）第三方实现的，比如 RabbitMQ 的 RA （3）自己实现的，比如 OpenStack 实现的它的各种服务的RA
+
+pacemaker 支持多种类型的集群， 包括Active/Active, Active/Passive, N+1, N to 1 ...
+
+corosync 用于高可用环境中提供通讯服务，位于高可用集群架构中的底层，扮演着为各节点之间提供心跳信息传递这样的功能。
+
+fencing agent 是在一个节点不稳定或者无答复时将其关闭，使得他不会损坏集群的其他资源，主要是用来消除脑裂。通常有两种类型的fencing agent : power, storage 。 power类型的agent会将节点的电源断电， storage类型的agent会确保其某一时刻只有一个节点会读写共享的存储。
+
+
+
+### command
+
+1. 重启资源
+
+   ```
+   crm resource restart clone_p_haproxy 
+   ```
 
 
 

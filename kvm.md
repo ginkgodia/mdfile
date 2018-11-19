@@ -152,6 +152,8 @@ ESCloud 安装总结：
   NETMASK=255.255.0.0
   NETWORK=172.28.0.0
   ONBOOT=yes
+  
+  ip link set xx up
   ```
 
 - 在解决问题中发现的解决方案
