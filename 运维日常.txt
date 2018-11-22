@@ -1,0 +1,22 @@
+## Roller删节点：
+
+第一步：
+roller node --node-id 2 --delete-from-db # 从roller的postgres数据库中删除
+
+
+cobbler system remove --name node-9 # 从cobbler里删除。
+
+第二步：
+
+export PGPASSWORD=`cat /etc/roller/astute.yaml |grep nailgun_password |awk '{print $2}'`  # 找到Postgresql nailgun 的用户密码
+
+psql -U nailgun nailgun -h localhost -c "ALTER SEQUENCE nodes_id_seq RESTART WITH X;"  
+#将节点重新编号
+X就是最后一个已经发现的节点的编号再加1。
+
+路由策略
+iptables -t nat -A PREROUTING -d 192.168.4.8/32 -p tcp -m tcp --dport 443 -j DNAT --to-destination 172.16.10.2:443
+
+
+
+
